@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detector PCB</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.14.0/ort.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .image-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #imageDisplay {
+            max-width: 100%;
+            max-height: 500px;
+            display: none;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 100%;
+            max-height: 500px;
+        }
+
+        .upload-placeholder {
+            text-align: center;
+            color: white;
+            padding: 40px;
+        }
+
+        .upload-placeholder svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.7;
+        }
+
+        .controls {
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            background: #f8f9fa;
+            flex-wrap: wrap;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-width: 150px;
+        }
+
+        #uploadBtn {
+            background: #667eea;
+            color: white;
+        }
+
+        #uploadBtn:active {
+            transform: scale(0.95);
+            background: #5568d3;
+        }
+
+        #detectBtn {
+            background: #4ECDC4;
+            color: white;
+        }
+
+        #detectBtn:active {
+            transform: scale(0.95);
+            background: #3dbdb5;
+        }
+
+        #detectBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #clearBtn {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        #clearBtn:active {
+            transform: scale(0.95);
+            background: #ff5252;
+        }
+
+        #clearBtn:disabled {
+            background: #ffcccb;
+            cursor: not-allowed;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .detection-info {
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .component-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+            animation: slideIn 0.3s ease;
+            position: relative;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .component-name {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 8px;
+            padding-right: 30px;
+        }
+
+        .remove-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: transparent;
+            color: #ff6b6b;
+            border: none;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 24px;
+            text-align: center;
+            transition: all 0.2s;
+            font-weight: bold;
+        }
+
+        .remove-btn:hover {
+            color: #ff5252;
+            transform: scale(1.2);
+        }
+
+        .component-desc {
+            font-size: 14px;
+            color: #333;
+            line-height: 1.5;
+        }
+
+        .confidence {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Detector de Componentes PCB</h1>
+            <p>Sube una imagen de un componente electrónico</p>
+        </div>
+
+        <div class="image-container" id="imageContainer">
+            <div class="upload-placeholder" id="placeholder">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+                <p>Haz clic en "Subir Imagen" para comenzar</p>
+            </div>
+            <img id="imageDisplay" alt="Imagen cargada">
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <div class="controls">
+            <input type="file" id="fileInput" accept="image/*">
+            <button id="uploadBtn">📤 Subir Imagen</button>
+            <button id="detectBtn" disabled>🔍 Detectar</button>
+            <button id="clearBtn" disabled>🗑️ Limpiar Lista</button>
+        </div>
+
+        <div class="status" id="status">Sube una imagen para comenzar</div>
+
+        <div class="detection-info" id="detectionInfo">
+            <div class="empty-state">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                </svg>
+                <p>No hay componentes detectados</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const imageDisplay = document.getElementById('imageDisplay');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const detectBtn = document.getElementById('detectBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const status = document.getElementById('status');
+        const detectionInfo = document.getElementById('detectionInfo');
+        const placeholder = document.getElementById('placeholder');
+
+        let session = null;
+        let currentImage = null;
+        let detectedComponents = {};
+
+        const componentDescriptions = {
+            'Capacitor': 'Almacena energía eléctrica temporalmente. Se usa para filtrar señales, estabilizar voltaje y acoplar/desacoplar señales AC/DC.',
+            'IC': 'Circuito Integrado. Contiene múltiples componentes electrónicos en un chip. Realiza funciones complejas como procesamiento, amplificación o control.',
+            'LED': 'Diodo Emisor de Luz. Componente que emite luz cuando pasa corriente. Se usa como indicador visual o iluminación.',
+            'Resistor': 'Limita el flujo de corriente eléctrica. Se usa para controlar voltaje, dividir tensión y proteger otros componentes.',
+            'connector': 'Conector eléctrico. Permite conectar y desconectar circuitos o cables de forma mecánica. Facilita el montaje y mantenimiento.',
+            'diode': 'Permite el flujo de corriente en una sola dirección. Se usa para rectificación, protección contra polaridad inversa y señalización.',
+            'inductor': 'Almacena energía en forma de campo magnético. Se usa en filtros, transformadores y circuitos de sintonización.',
+            'potentiometer': 'Resistencia variable ajustable manualmente. Permite controlar voltaje o corriente de forma continua, usado en controles de volumen y ajustes.',
+            'relay': 'Interruptor controlado eléctricamente. Permite controlar circuitos de alta potencia con señales de baja potencia.',
+            'transistor': 'Amplifica o conmuta señales electrónicas. Es el componente fundamental de la electrónica moderna, usado en amplificadores y circuitos digitales.'
+        };
+
+        const colors = {
+            'Capacitor': '#FF6B6B',
+            'IC': '#4ECDC4',
+            'LED': '#FFE66D',
+            'Resistor': '#95E1D3',
+            'connector': '#F38181',
+            'diode': '#AA96DA',
+            'inductor': '#FCBAD3',
+            'potentiometer': '#A8D8EA',
+            'relay': '#FFAAA7',
+            'transistor': '#C7CEEA'
+        };
+
+        async function loadModel() {
+            status.innerHTML = '<div class="loading"><div class="spinner"></div><p>Cargando modelo...</p></div>';
+            try {
+                const modelUrl = 'Version1.onnx';
+                session = await ort.InferenceSession.create(modelUrl);
+                status.textContent = 'Modelo cargado correctamente';
+                return true;
+            } catch (error) {
+                status.textContent = '❌ Error: Coloca el archivo Version1.onnx en la misma carpeta';
+                console.error('Error cargando modelo:', error);
+                return false;
+            }
+        }
+
+        uploadBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    currentImage = new Image();
+                    currentImage.onload = () => {
+                        placeholder.style.display = 'none';
+                        imageDisplay.style.display = 'block';
+                        imageDisplay.src = event.target.result;
+                        
+                        const containerWidth = imageDisplay.parentElement.offsetWidth;
+                        const containerHeight = 500;
+                        
+                        let displayWidth = currentImage.width;
+                        let displayHeight = currentImage.height;
+                        
+                        if (displayWidth > containerWidth) {
+                            displayHeight = (containerWidth / displayWidth) * displayHeight;
+                            displayWidth = containerWidth;
+                        }
+                        
+                        if (displayHeight > containerHeight) {
+                            displayWidth = (containerHeight / displayHeight) * displayWidth;
+                            displayHeight = containerHeight;
+                        }
+                        
+                        canvas.width = displayWidth;
+                        canvas.height = displayHeight;
+                        
+                        detectBtn.disabled = false;
+                        status.textContent = 'Imagen cargada. Haz clic en "Detectar" para analizar';
+                    };
+                    currentImage.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        detectBtn.addEventListener('click', async () => {
+            if (!currentImage) return;
+            
+            if (!session) {
+                const loaded = await loadModel();
+                if (!loaded) return;
+            }
+            
+            detectBtn.disabled = true;
+            status.innerHTML = '<div class="loading"><div class="spinner"></div><p>Detectando componentes...</p></div>';
+            
+            try {
+                const preprocessed = preprocessImage(currentImage);
+                const tensor = new ort.Tensor('float32', preprocessed.data, [1, 3, 640, 640]);
+                
+                const feeds = {};
+                feeds[session.inputNames[0]] = tensor;
+                
+                const results = await session.run(feeds);
+                const output = results[session.outputNames[0]];
+                
+                const detections = processDetections(output, currentImage.width, currentImage.height, preprocessed);
+                
+                detections.forEach(det => {
+                    const key = det.classId;
+                    if (!detectedComponents[key]) {
+                        detectedComponents[key] = {
+                            classId: det.classId,
+                            confidence: det.confidence
+                        };
+                    } else {
+                        if (det.confidence > detectedComponents[key].confidence) {
+                            detectedComponents[key].confidence = det.confidence;
+                        }
+                    }
+                });
+                
+                drawDetections(detections);
+                updateDetectionInfo();
+                
+                clearBtn.disabled = false;
+                status.textContent = `Detección completada: ${detections.length} componente(s) encontrado(s)`;
+            } catch (error) {
+                status.textContent = 'Error durante la detección';
+                console.error('Error en detección:', error);
+            }
+            
+            detectBtn.disabled = false;
+        });
+
+        clearBtn.addEventListener('click', () => {
+            detectedComponents = {};
+            updateDetectionInfo();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            status.textContent = 'Lista limpiada';
+        });
+
+        function preprocessImage(img) {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = 640;
+            tempCanvas.height = 640;
+            
+            // Fondo negro (importante para letterboxing)
+            tempCtx.fillStyle = '#000000';
+            tempCtx.fillRect(0, 0, 640, 640);
+            
+            // Calcular dimensiones manteniendo aspect ratio (letterboxing como YOLO)
+            const scale = Math.min(640 / img.width, 640 / img.height);
+            const scaledWidth = img.width * scale;
+            const scaledHeight = img.height * scale;
+            const x = (640 - scaledWidth) / 2;
+            const y = (640 - scaledHeight) / 2;
+            
+            tempCtx.drawImage(img, x, y, scaledWidth, scaledHeight);
+            const imageData = tempCtx.getImageData(0, 0, 640, 640);
+            
+            const float32Data = new Float32Array(3 * 640 * 640);
+            for (let i = 0; i < imageData.data.length; i += 4) {
+                float32Data[i / 4] = imageData.data[i] / 255.0;
+                float32Data[640 * 640 + i / 4] = imageData.data[i + 1] / 255.0;
+                float32Data[2 * 640 * 640 + i / 4] = imageData.data[i + 2] / 255.0;
+            }
+            
+            return { data: float32Data, scale, offsetX: x, offsetY: y };
+        }
+
+        function processDetections(output, originalWidth, originalHeight, preprocessed) {
+            const detections = [];
+            const data = output.data;
+            const dims = output.dims;
+            
+            const numClasses = dims[1] - 4;
+            const numBoxes = dims[2];
+            
+            for (let i = 0; i < numBoxes; i++) {
+                const offset = i;
+                const x = data[offset];
+                const y = data[numBoxes + offset];
+                const w = data[2 * numBoxes + offset];
+                const h = data[3 * numBoxes + offset];
+                
+                let maxScore = 0;
+                let classId = 0;
+                
+                for (let j = 0; j < numClasses; j++) {
+                    const score = data[(4 + j) * numBoxes + offset];
+                    if (score > maxScore) {
+                        maxScore = score;
+                        classId = j;
+                    }
+                }
+                
+                if (maxScore > 0.25) {
+                    // Convertir de coordenadas del modelo (640x640) a coordenadas originales
+                    const x_center = (x - preprocessed.offsetX) / preprocessed.scale;
+                    const y_center = (y - preprocessed.offsetY) / preprocessed.scale;
+                    const width = w / preprocessed.scale;
+                    const height = h / preprocessed.scale;
+                    
+                    // Convertir de centro a esquina superior izquierda
+                    const x1 = x_center - width / 2;
+                    const y1 = y_center - height / 2;
+                    
+                    // Verificar que esté dentro de los límites de la imagen original
+                    if (x1 >= 0 && y1 >= 0 && x1 + width <= originalWidth && y1 + height <= originalHeight) {
+                        detections.push({
+                            classId,
+                            confidence: maxScore,
+                            x: x1,
+                            y: y1,
+                            width: width,
+                            height: height
+                        });
+                    }
+                }
+            }
+            
+            return nms(detections, 0.45);
+        }
+        
+        function nms(detections, iouThreshold) {
+            if (detections.length === 0) return [];
+            
+            detections.sort((a, b) => b.confidence - a.confidence);
+            
+            const keep = [];
+            const suppressed = new Set();
+            
+            for (let i = 0; i < detections.length; i++) {
+                if (suppressed.has(i)) continue;
+                
+                keep.push(detections[i]);
+                
+                for (let j = i + 1; j < detections.length; j++) {
+                    if (suppressed.has(j)) continue;
+                    
+                    const iou = calculateIoU(detections[i], detections[j]);
+                    if (iou > iouThreshold) {
+                        suppressed.add(j);
+                    }
+                }
+            }
+            
+            return keep;
+        }
+        
+        function calculateIoU(box1, box2) {
+            const x1 = Math.max(box1.x, box2.x);
+            const y1 = Math.max(box1.y, box2.y);
+            const x2 = Math.min(box1.x + box1.width, box2.x + box2.width);
+            const y2 = Math.min(box1.y + box1.height, box2.y + box2.height);
+            
+            const intersectionArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+            
+            const box1Area = box1.width * box1.height;
+            const box2Area = box2.width * box2.height;
+            
+            const unionArea = box1Area + box2Area - intersectionArea;
+            
+            return intersectionArea / unionArea;
+        }
+
+        function drawDetections(detections) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const classNames = Object.keys(componentDescriptions);
+            
+            // Escalar las detecciones al tamaño del canvas mostrado
+            const scaleX = canvas.width / currentImage.width;
+            const scaleY = canvas.height / currentImage.height;
+            
+            detections.forEach(det => {
+                const className = classNames[det.classId];
+                const color = colors[className] || '#FF6B6B';
+                
+                const x = det.x * scaleX;
+                const y = det.y * scaleY;
+                const width = det.width * scaleX;
+                const height = det.height * scaleY;
+                
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, width, height);
+                
+                ctx.fillStyle = color;
+                const textWidth = ctx.measureText(className).width;
+                ctx.fillRect(x, y - 25, textWidth + 10, 25);
+                
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(className, x + 5, y - 7);
+            });
+        }
+
+        function updateDetectionInfo() {
+            const components = Object.values(detectedComponents);
+            
+            if (components.length === 0) {
+                detectionInfo.innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                        </svg>
+                        <p>No hay componentes detectados</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const classNames = Object.keys(componentDescriptions);
+            let html = '';
+            
+            components.forEach(comp => {
+                const className = classNames[comp.classId];
+                const desc = componentDescriptions[className];
+                const conf = (comp.confidence * 100).toFixed(1);
+                
+                html += `
+                    <div class="component-card">
+                        <button class="remove-btn" onclick="removeComponent(${comp.classId})">✕</button>
+                        <div class="component-name">${className}</div>
+                        <div class="component-desc">${desc}</div>
+                        <span class="confidence">Confianza: ${conf}%</span>
+                    </div>
+                `;
+            });
+            
+            detectionInfo.innerHTML = html;
+        }
+
+        function removeComponent(classId) {
+            delete detectedComponents[classId];
+            updateDetectionInfo();
+        }
+
+        window.removeComponent = removeComponent;
+
+        loadModel();
+    </script>
+</body>
+</html>
